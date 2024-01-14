@@ -23,9 +23,13 @@ Ext.define('PVE.qemu.AudioInputPanel', {
 	value: 'ich9-intel-hda',
 	fieldLabel: gettext('Audio Device'),
 	comboItems: [
-	    ['ich9-intel-hda', 'ich9-intel-hda'],
-	    ['intel-hda', 'intel-hda'],
-	    ['AC97', 'AC97'],
+	    ['ich9-intel-hda', 'Intel HD Audio (ich9)'],
+	    ['intel-hda', 'Intel HD Audio (ich6)'],
+	    ['AC97', 'Intel AC97 Audio'],
+	    ['sb16', 'Creative Sound Blaster 16 (isa)'],
+	    ['adlib', 'Yamaha YM3812 (isa)'],
+	    ['pcspk', 'PC Speaker'],
+	    ['sb16-adlib-pcspk', 'Combination of sb16, adlib and pcspk'],
 	],
     }, {
 	name: 'driver',
