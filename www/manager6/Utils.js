@@ -597,7 +597,7 @@ Ext.define('PVE.Utils', {
     kvm_vga_drivers: {
 	'__default__': Proxmox.Utils.defaultText,
 	std: gettext('Standard VGA'),
-	cirrus: gettext('Cirrus VGA'),
+	cirrus: 'Cirrus VGA',
 	vmware: gettext('VMware compatible'),
 	qxl: 'SPICE',
 	qxl2: 'SPICE dual monitor',
