@@ -14,7 +14,10 @@ Ext.define('PVE.qemu.MachineInputPanel', {
 	    let version = me.lookup('version');
 	    let store = version.getStore();
 	    let oldRec = store.findRecord('id', version.getValue(), 0, false, false, true);
-	    let type = value === 'q35' ? 'q35' : 'i440fx';
+	    let type = 'i440fx';
+	    if (value === 'q35') { type = 'q35'; }
+	    if (value === 'virt') { type = 'virt'; }
+	    if (value === 'sun') { type = 'sun'; }
 	    store.clearFilter();
 	    store.addFilter(val => val.data.id === 'latest' || val.data.type === type);
 	    if (!me.getView().isWindows) {
@@ -60,7 +63,16 @@ Ext.define('PVE.qemu.MachineInputPanel', {
 	}
 	if (values.machine !== '__default__' && values.machine !== 'q35') {
 	    values.version = values.machine;
-	    values.machine = values.version.match(/q35/) ? 'q35' : '__default__';
+	    // values.machine = values.version.match(/q35/) ? 'q35' : '__default__';
+	    if (values.version.match(/q35/)) {
+	        values.machine = 'q35';
+	    } else if (values.version.match(/virt/)) {
+	        values.machine = 'virt';
+	    } else if (values.version.match(/sun/)) {
+	        values.machine = 'sun';
+	    } else {
+	        values.machine = '__default__';
+	    }
 
 	    // avoid hiding a pinned version
 	    me.setAdvancedVisible(true);
@@ -77,6 +89,8 @@ Ext.define('PVE.qemu.MachineInputPanel', {
 	comboItems: [
 	    ['__default__', PVE.Utils.render_qemu_machine('')],
 	    ['q35', 'q35'],
+	    ['virt', 'aarch64 virt'],
+	    ['sun', 'sparc64 sun'],
 	],
     },
 
