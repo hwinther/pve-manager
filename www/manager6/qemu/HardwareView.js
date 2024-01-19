@@ -178,8 +178,10 @@ Ext.define('PVE.qemu.HardwareView', {
 			iconCls: 'cogs',
 			renderer: function(value, metaData, record, rowIndex, colIndex, store, pending) {
 				let arch = me.getObjectValue('arch', undefined, pending);
-				console.log(arch, value, pending);
-				return value === '__default__' ? 'Default (x86_64)' : arch;
+				if (arch) {
+					return arch === '__default__' ? '[Default (x86_64)]' : '[' + arch + ']';
+				}
+				return value === '__default__' ? 'Default (x86_64)' : value;
 			},
 	    },
 	    scsihw: {
