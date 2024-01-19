@@ -254,6 +254,7 @@ JSSRC= 							\
 	qemu/Options.js					\
 	qemu/PCIEdit.js					\
 	qemu/ProcessorEdit.js				\
+	qemu/QemuArchEdit.js				\
 	qemu/QemuBiosEdit.js				\
 	qemu/RNGEdit.js					\
 	qemu/SSHKey.js					\
