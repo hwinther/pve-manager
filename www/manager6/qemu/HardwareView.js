@@ -735,6 +735,13 @@ Ext.define('PVE.qemu.HardwareView', {
 				disabled: !caps.nodes['Sys.Console'],
 				handler: editorFactory('RNGEdit'),
 			    },
+			    {
+				text: gettext("Architecture"),
+				itemId: 'addArch',
+				iconCls: 'fa fa-fw fa-cogs black',
+				disabled: !caps.nodes['VM.Config.Arch'],
+				handler: editorFactory('QemuArchEdit'),
+			    },
 			],
 		    }),
 		},
