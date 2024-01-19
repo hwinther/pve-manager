@@ -1,6 +1,6 @@
 Ext.define('PVE.form.QemuArchSelector', {
     extend: 'Proxmox.form.KVComboBox',
-    alias: ['widget.pveQemuBiosSelector'],
+    alias: ['widget.pveQemuArchSelector'],
 
     initComponent: function() {
 	var me = this;
