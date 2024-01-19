@@ -169,6 +169,18 @@ Ext.define('PVE.qemu.HardwareView', {
 		    return PVE.Utils.render_qemu_machine(value);
 		},
 	    },
+	    arch: {
+			header: 'Architecture',
+			group: 90,
+			never_delete: true,
+			editor: caps.vms['VM.Config.Options'] ? 'PVE.qemu.QemuArchEdit' : undefined,
+			defaultValue: '',
+			iconCls: 'cogs',
+			renderer: function(value, metaData, record, rowIndex, colIndex, store, pending) {
+				let arch = me.getObjectValue('arch', undefined, pending);
+				return value === '__default__' ? 'Default (x86_64)' : value;
+			},
+	    },
 	    scsihw: {
 		header: gettext('SCSI Controller'),
 		iconCls: 'database',
