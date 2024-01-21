@@ -9,6 +9,8 @@ Ext.define('PVE.form.QemuArchSelector', {
 	    ['__default__', 'Default (x86_64)'],
 	    ['x86_64', 'x86_64'],
 	    ['aarch64', 'aarch64'],
+	    ['sparc', 'sparc'],
+	    ['sparc64', 'sparc64'],
 	];
 
 	me.callParent();
