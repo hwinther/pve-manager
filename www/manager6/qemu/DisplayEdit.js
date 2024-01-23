@@ -41,7 +41,7 @@ Ext.define('PVE.qemu.DisplayInputPanel', {
 		    memoryfield.setEmptyText("16");
 		} else if (val.match(/^virtio/)) {
 		    memoryfield.setEmptyText("256");
-		} else if (val.match(/^(serial\d|none)$/)) {
+		} else if (val.match(/^(serial\d|none)$/) || val === "tcx" || val === "cg3") {
 		    memoryfield.setEmptyText("N/A");
 		    disableMemoryField = true;
 		} else {

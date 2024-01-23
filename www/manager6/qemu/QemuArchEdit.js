@@ -33,7 +33,7 @@ Ext.define('PVE.qemu.ArchEdit', {
 
     items: [
 	{
-	    xtype: 'pveQemuBiosSelector',
+	    xtype: 'pveQemuArchSelector',
 	    onlineHelp: 'qm_options',
 	    name: 'arch',
 	    value: '__default__',

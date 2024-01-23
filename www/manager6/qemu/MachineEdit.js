@@ -61,6 +61,7 @@ Ext.define('PVE.qemu.MachineInputPanel', {
 		values.version = 'pc-q35-5.1';
 	    }
 	}
+
 	if (values.machine !== '__default__' && values.machine !== 'q35') {
 	    values.version = values.machine;
 	    // values.machine = values.version.match(/q35/) ? 'q35' : '__default__';
