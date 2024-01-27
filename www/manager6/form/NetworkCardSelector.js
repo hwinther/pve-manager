@@ -10,5 +10,6 @@ Ext.define('PVE.form.NetworkCardSelector', {
 	["ne2k_pci", "RTL8029 NE2000 PCI"],
 	['pcnet', 'AMD PCnet FAST'],
 	['sunhme', 'Sun Happy Meal (sparc64 only)'],
+	['lance', 'Lance Am7990 (sparc only)'],
     ],
 });
