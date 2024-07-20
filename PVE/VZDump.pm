@@ -477,20 +477,6 @@ my sub get_hostname {
     return $hostname;
 }
 
-my $subject_template = "vzdump backup status ({{hostname}}): {{status-text}}";
-
-my $body_template = <<EOT;
-{{error-message}}
-{{heading-1 "Details"}}
-{{table guest-table}}
-{{#verbatim}}
-Total running time: {{duration total-time}}
-Total size: {{human-bytes total-size}}
-{{/verbatim}}
-{{heading-1 "Logs"}}
-{{verbatim-monospaced logs}}
-EOT
-
 use constant MAX_LOG_SIZE => 1024*1024;
 
 sub send_notification {
@@ -530,10 +516,9 @@ sub send_notification {
 	    "See Task History for details!\n";
     };
 
-    my $hostname = get_hostname();
-
     my $notification_props = {
-	"hostname" => $hostname,
+	# Hostname, might include domain part
+	"hostname" => get_hostname(),
 	"error-message" => $err,
 	"guest-table" => build_guest_table($tasklist),
 	"logs" => $text_log_part,
@@ -547,7 +532,8 @@ sub send_notification {
 	# backup job id here... (I think pvescheduler would need
 	# to pass that to the vzdump call?)
 	type => "vzdump",
-	hostname => $hostname,
+	# Hostname (without domain part)
+	hostname => PVE::INotify::nodename(),
     };
 
     my $severity = $failed ? "error" : "info";
@@ -588,8 +574,7 @@ sub send_notification {
 
 	    PVE::Notify::notify(
 		$severity,
-		$subject_template,
-		$body_template,
+		"vzdump",
 		$notification_props,
 		$fields,
 		$notification_config
@@ -600,8 +585,7 @@ sub send_notification {
 	# no email addresses were configured.
 	PVE::Notify::notify(
 	    $severity,
-	    $subject_template,
-	    $body_template,
+	    "vzdump",
 	    $notification_props,
 	    $fields,
 	);
@@ -1100,7 +1084,7 @@ sub exec_backup_task {
 	$task->{mode} = $mode;
 
    	debugmsg ('info', "backup mode: $mode", $logfd);
-	debugmsg ('info', "bandwidth limit: $opts->{bwlimit} KB/s", $logfd)  if $opts->{bwlimit};
+	debugmsg ('info', "bandwidth limit: $opts->{bwlimit} KiB/s", $logfd)  if $opts->{bwlimit};
 	debugmsg ('info', "ionice priority: $opts->{ionice}", $logfd);
 
 	if ($mode eq 'stop') {
