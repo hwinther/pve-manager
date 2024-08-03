@@ -505,6 +505,16 @@ Ext.define('PVE.Utils', {
 	    return "SeaBIOS";
 	} else if (value === 'ovmf') {
 	    return "OVMF (UEFI)";
+	} else if (value === 'openbios-sparc32') { // TODO: don't repeat these names in both combo selector and render function?
+	    return "OpenBIOS (sparc only)";
+	} else if (value === 'openbios-sparc64') { // TODO: also handle architectural different defaults (not all default to SeaBIOS)
+	    return "OpenBIOS (sparc64 only)";
+	} else if (value === 'ss5.bin') {
+	    return "SS5 PROM (sparc only)";
+	} else if (value === 'ss10_v2.25_rom') {
+	    return "SS10 PROM (sparc only)";
+	} else if (value === 'ss20_v2.25_rom') {
+	    return "SS20 PROM (sparc only)";
 	} else {
 	    return value;
 	}
@@ -597,6 +607,9 @@ Ext.define('PVE.Utils', {
     kvm_vga_drivers: {
 	'__default__': Proxmox.Utils.defaultText,
 	std: gettext('Standard VGA'),
+	tcx: 'TCX framebuffer (sparc only)', // TODO: when using sparc or other platforms there should be separate combo data sources
+	cg3: 'CG3 framebuffer (sparc only)',
+	cirrus: 'Cirrus VGA',
 	vmware: gettext('VMware compatible'),
 	qxl: 'SPICE',
 	qxl2: 'SPICE dual monitor',
