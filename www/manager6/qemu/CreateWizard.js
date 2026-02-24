@@ -255,8 +255,8 @@ Ext.define('PVE.qemu.CreateWizard', {
                         ],
                     },
                     columns: [
-                        { header: 'Key', width: 150, dataIndex: 'key' },
-                        { header: 'Value', flex: 1, dataIndex: 'value', renderer: Ext.htmlEncode },
+                        { header: gettext('Key'), width: 150, dataIndex: 'key' },
+                        { header: gettext('Value'), flex: 1, dataIndex: 'value', renderer: Ext.htmlEncode },
                     ],
                 },
             ],
