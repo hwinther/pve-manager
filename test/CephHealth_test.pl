@@ -189,7 +189,7 @@ for my $test ($tests->@*) {
     my $health = { checks => $test->{checks} };
     my $rados = FakeRados->new($test->{flags}, $health);
 
-    my ($worst, $blockers, $ignored, $errors, $blocking) =
+    my ($worst, $blockers, $ignored, $errors) =
         PVE::Ceph::Services::classify_health_checks($rados, $health, 'osd');
 
     is($worst, $test->{expected}, "$test->{name} - severity");
@@ -210,14 +210,15 @@ for my $test ($tests->@*) {
         is($sev, $test->{sev}, "$test->{name} - reported severity, force=$force");
     }
 
-    # The annotation has to reach the same verdict as the classifier, for every check.
+    # Use the fixture's expected blockers, not another call to the same classifier.
+    my %blocking = map { (split(/:/, $_, 2))[0] => 1 } ($test->{blockers} // [])->@*;
     my $status = { health => { checks => $test->{checks} } };
     PVE::Ceph::Services::annotate_restart_blocking($status, FakeRados->new($test->{flags}));
     for my $name (sort keys $test->{checks}->%*) {
         is(
             $status->{health}->{checks}->{$name}->{'blocks-restart'}->{osd},
-            $blocking->{$name} ? 1 : 0,
-            "$test->{name} - annotation agrees for $name",
+            $blocking{$name} // 0,
+            "$test->{name} - annotation for $name",
         );
     }
 }
@@ -295,7 +296,7 @@ is_deeply(
 
     sub new {
         my ($class, @flagged) = @_;
-        return bless { flagged => { map { $_ => 1 } @flagged }, calls => [], events => [] }, $class;
+        return bless { flagged => { map { $_ => 1 } @flagged }, events => [] }, $class;
     }
 
     sub mon_command {
@@ -311,7 +312,6 @@ is_deeply(
             };
         }
         my $call = "$cmd->{prefix}:" . join(',', $cmd->{who}->@*);
-        push $self->{calls}->@*, $call;
         push $self->{events}->@*, $call;
         return {};
     }
@@ -342,39 +342,27 @@ is_deeply($unflagged->(NooutRados->new(0, 1, 2), [0, 1, 2]), [], 'nothing to own
 # and the wrapper must touch only the owned ids, in both directions
 {
     my $rados = NooutRados->new(1);
-    my $ran = 0;
-    my @owned;
     PVE::Ceph::Services::with_noout(
         $rados,
         ['osd.0', 'osd.1', 'osd.2'],
-        sub { $ran = 1 },
-        sub {
-            push @owned, [$_[0]->@*];
-            push $rados->{events}->@*, scalar($_[0]->@*) ? 'persist:0,2' : 'clear';
-        },
+        sub { push $rados->{events}->@*, 'body' },
+        sub { push $rados->{events}->@*, ['persist', [$_[0]->@*]] },
     );
-    is($ran, 1, 'the body runs');
-    is_deeply(
-        $rados->{calls},
-        ['osd set-group:0,2', 'osd unset-group:0,2'],
-        'only the unflagged OSDs are set and unset',
-    );
-    is_deeply($owned[0], [0, 2], 'the owned set is reported to the caller');
-    is_deeply($owned[1], [], 'and cleared again after a successful unset');
     is_deeply(
         $rados->{events},
-        ['persist:0,2', 'osd set-group:0,2', 'osd unset-group:0,2', 'clear'],
-        'the recovery intent is persisted before noout is set',
+        [
+            ['persist', [0, 2]], 'osd set-group:0,2', 'body', 'osd unset-group:0,2',
+            ['persist', []],
+        ],
+        'only owned flags surround the body, with journal updates in recovery order',
     );
 }
 
 # an already fully flagged set must not issue either command
 {
     my $rados = NooutRados->new(0, 1, 2);
-    my $ran = 0;
-    PVE::Ceph::Services::with_noout($rados, [0, 1, 2], sub { $ran = 1 });
-    is($ran, 1, 'the body still runs when nothing is ours');
-    is_deeply($rados->{calls}, [], 'no flag command is issued');
+    PVE::Ceph::Services::with_noout($rados, [0, 1, 2], sub { push $rados->{events}->@*, 'body' });
+    is_deeply($rados->{events}, ['body'], 'the body runs without touching pre-existing flags');
 }
 
 done_testing();

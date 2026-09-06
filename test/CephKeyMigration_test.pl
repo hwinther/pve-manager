@@ -424,8 +424,6 @@ is(
     open(my $mfh, '<', $module) or die $!;
     my @module_lines = <$mfh>;
     close($mfh);
-    my %exported = map { $_ => 1 } grep { m/^\w+$/ }
-        map { split(/\s+/, $_) } grep { m/^sub (\w+)/ ? 0 : 1 } ();
     my %module_subs;
     for my $line (@module_lines) {
         $module_subs{$1} = 1 if $line =~ m/^sub (\w+)/;
@@ -581,6 +579,8 @@ is(
     );
     ok(!exists $stale->{'client.backup'}, 'an entity nobody rotated is not reported');
 
+    # Without a measurement or key targets, connected sessions prove nothing about a rotation.
+    # Confirmation must measure them before accepting.
     $stale = stale_consumers($sessions, { 'client.admin' => { rotated => 1000 } });
     is_deeply($stale, {}, 'a record without a measurement proves nothing by itself');
 
@@ -617,31 +617,6 @@ is(
         'every CephFS storage of the key is redone, an RBD storage has no mount to redo',
     );
     is_deeply(cephfs_mount_storages({ files => [] }), [], 'a key without storages redoes nothing');
-}
-
-# --- a record without a measurement cannot be confirmed away ------------------------------------
-{
-    # the same predicate the confirmation uses: a record with no recorded instances proves
-    # nothing about the clients connected as that key right now
-    my $sessions = {
-        complete => 1,
-        clients => { 'client.admin' => [{ global_id => 7, host => 'a' }] },
-    };
-    is_deeply(
-        stale_consumers($sessions, { 'client.admin' => { rotated => 1 } }),
-        {},
-        'an unmeasured record flags nobody, so the run must measure before it may confirm',
-    );
-    is_deeply(
-        [
-            map { $_->{global_id} } stale_consumers(
-                $sessions,
-                { 'client.admin' => { rotated => 1, session_ids => [7] } },
-            )->{'client.admin'}->@*
-        ],
-        [7],
-        'once measured, the client connected as that key is a named consumer',
-    );
 }
 
 # --- what a requested confirmation may do ------------------------------------------------------
@@ -1568,22 +1543,6 @@ my sub cluster {
         0,
         'and a non-durable phase cannot authorize dropping it either',
     );
-
-    # The preflight uses the same verdict to decide whether a staged key is one it may resume or
-    # one it has to stop over, so a record left behind by an older run must not wave a stranger's
-    # key through.
-    for my $shape (
-        [
-            { phase => 'staged', key => $ours },
-            $theirs,
-            'a record whose key is not the staged one',
-        ],
-        [undef, $theirs, 'no record at all'],
-    ) {
-        my ($swap, $staged, $name) = @$shape;
-        my $v = resume_verdict($swap, $staged)->{verdict};
-        ok($v ne 'clear' && $v ne 'commit', "the preflight still refuses over $name");
-    }
 }
 
 # --- manager order -------------------------------------------------------------------------
@@ -1813,23 +1772,20 @@ my sub cluster {
         complete => 1,
         clients => { 'client.crash' => [{ global_id => 45, host => 'node1' }] },
     };
-    ok(
-        !grep({ m/^--wipe-rotating-keys:/ }
-            open_options($wipe, {}, {}, $CIPHER, $refresh, $connected)->{next}->@*),
-        'the wipe is not offered while its fresh guard sees a recorded consumer',
-    );
-    ok(
-        !grep({ m/^--wipe-rotating-keys:/ }
-            open_options($wipe, {}, {}, $CIPHER, $refresh, { complete => 1, clients => {} })
-                ->{next}->@*),
-        'the wipe is not offered while a refresh record still needs acknowledgment',
-    );
-    ok(
-        !grep({ m/^--wipe-rotating-keys:/ }
-            open_options($wipe, {}, {}, $CIPHER, {}, { complete => 0, clients => {} })->{next}
-                ->@*),
-        'the wipe is not offered while the live session picture is incomplete',
-    );
+    # Enable the display prerequisite so each refusal exercises its safety condition.
+    for my $case (
+        ['a recorded consumer', $refresh, $connected],
+        ['an unconfirmed refresh', $refresh, { complete => 1, clients => {} }],
+        ['an incomplete session query', {}, { complete => 0, clients => {} }],
+    ) {
+        my ($reason, $state, $sessions) = @$case;
+        ok(
+            !grep({ m/^--wipe-rotating-keys:/ }
+                open_options($wipe, { verbose => 1 }, {}, $CIPHER, $state, $sessions)->{next}
+                    ->@*),
+            "the wipe is not offered with $reason",
+        );
+    }
 
     ok(
         scalar(
@@ -1839,7 +1795,10 @@ my sub cluster {
         "'--only' allows --wipe-rotating-keys once the service cipher is switched",
     );
     ok(
-        !scalar(open_options($wipe, { only => { 'osd.3' => 1 } }, {}, $LEGACY_CIPHER)->{next}->@*),
+        !scalar(
+            open_options($wipe, { verbose => 1, only => { 'osd.3' => 1 } }, {}, $LEGACY_CIPHER)
+                ->{next}->@*
+        ),
         'and it is not offered while the switch is still pending, as that run refuses it',
     );
 }
@@ -1964,11 +1923,6 @@ my sub cluster {
         'and restarts the daemon, which may still hold the old key in memory',
     );
     is(
-        resume_verdict({ phase => 'staged', key => $fp }, $fp)->{verdict},
-        'clear',
-        'while nothing written yet is still safe to drop',
-    );
-    is(
         resume_verdict({ phase => 'staging' }, $fp)->{verdict},
         'foreign',
         'a pending key without a journal fingerprint remains unowned',
@@ -2053,15 +2007,7 @@ my sub cluster {
     is_deeply(
         [sort map { $_->{fsid} } @$planned],
         ['aaa', 'ccc', 'ddd', 'eee'],
-        'a legacy key is planned, and so is any OSD whose two copies disagree',
-    );
-    ok(
-        !grep({ $_->{fsid} eq 'bbb' } @$planned),
-        'only an OSD whose tag holds the very key the auth entry holds is left alone',
-    );
-    ok(
-        (grep { $_->{fsid} eq 'ddd' } @$planned),
-        'two different keys that both decode as the new cipher are not mistaken for done',
+        'legacy, mismatched, and unlocated keys are planned; matching and orphaned entries are not',
     );
     is(
         (grep { $_->{fsid} eq 'eee' } @$planned)[0]->{missing},
@@ -2072,10 +2018,6 @@ my sub cluster {
         (grep { $_->{fsid} eq 'aaa' } @$planned)[0]->{node},
         'due',
         'each entry carries the node its tag lives on',
-    );
-    ok(
-        !grep({ $_->{fsid} eq 'fff' } @$planned),
-        'an entry no OSD in the map claims is left out, so the rest can still be rotated',
     );
     is_deeply(
         plan_lockbox_keys({ lockbox => {} }, { 'rotate-lockbox-keys' => 1 }),

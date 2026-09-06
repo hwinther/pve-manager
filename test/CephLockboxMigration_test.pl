@@ -41,14 +41,11 @@ our $HOOKS = lockbox_test_hooks();
             osds => $args{osds} // [{ osd => 7, uuid => $main::FSID }],
             pending_factory => $args{pending_factory} // $main::NEW,
             clear_fails => $args{clear_fails},
-            commands => [],
         }, $class;
     }
 
     sub mon_command {
         my ($self, $args) = @_;
-        push $self->{commands}->@*, {%$args};
-
         return { osds => [map { +{%$_} } $self->{osds}->@*] }
             if $args->{prefix} eq 'osd dump';
 
@@ -209,13 +206,9 @@ sub info_for {
     };
 }
 
-my @saved;
 {
     no warnings qw(once redefine);
-    local *main::file_set_contents = sub {
-        my ($path, $content) = @_;
-        push @saved, [$path, $content];
-    };
+    local *main::file_set_contents = sub { };
 
     set_rows(
         ['/dev/vg/osd-db', base_tags('db', $OLD)],

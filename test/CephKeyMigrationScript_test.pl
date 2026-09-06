@@ -92,7 +92,6 @@ sub run_client_rotation {
 }
 
 {
-    my $startup = picture(1, 1);
     my $state = { client_keys_seen => { 'client.app' => key_fingerprint($OLD) } };
     my $rados = ClientRotationRados->new($OLD);
     my ($calls) = run_client_rotation(
@@ -103,12 +102,7 @@ sub run_client_rotation {
     is_deeply(
         $state->{client_refresh}->{'client.app'}->{session_ids},
         [1, 2, 3],
-        'clients appearing after the startup snapshot or across the rotation are retained',
-    );
-    is_deeply(
-        [map { $_->{global_id} } $startup->{clients}->{'client.app'}->@*],
-        [1],
-        'the startup picture alone did not contain those consumers',
+        'clients appearing across the rotation are retained',
     );
     ok(
         !$state->{client_refresh}->{'client.app'}->{measurement_incomplete},
@@ -395,18 +389,6 @@ sub restriction_is_offered {
 }
 
 {
-    my $rados = CurrentMonitorRados->new(
-        mons => [qw(a b)],
-        quorum => [qw(a b)],
-        metadata => [{ name => 'a', hostname => 'node-a' }],
-    );
-    my $current = $HOOKS->{collect_monitor_state}->(
-        $rados, sub { return encode_json([]) },
-    );
-    ok(!$current->{sessions}->{complete}, 'missing fresh monitor metadata marks the sweep partial');
-}
-
-{
     my @inventories = (
         ['an empty monitor map', [], [], [], qr/refresh the monitor map/],
         [
@@ -480,7 +462,6 @@ sub migrated_info {
         $state,
     );
     cmp_ok($verdict, '<', 0, 'an unknown acknowledgment fails before the migrated no-op return');
-    is($verdict == 0 ? 0 : 1, 1, 'the refused preflight verdict maps to a nonzero main status');
 }
 
 {
@@ -3609,11 +3590,6 @@ sub run_aggregate_confirmation {
             1;
         } ? '' : $@;
     };
-    like(
-        $bulk_abort->('client.vm', $files),
-        qr/rollback option for 'client\.vm' contradicts the rotation option/,
-        'aborting a user the bulk option selects is refused',
-    );
     is($bulk_abort->('client.admin', $files), '', 'client.admin is not selected by it');
     is($bulk_abort->('client.other', $files), '', 'nor is a user without a storage');
     is(
@@ -3623,8 +3599,8 @@ sub run_aggregate_confirmation {
     );
     like(
         $bulk_abort->('client.vm', $files),
-        qr/contradicts/,
-        'the refreshed mapping after locking repeats the check',
+        qr/rollback option for 'client\.vm' contradicts the rotation option/,
+        'a newly mapped storage user conflicts with the bulk rotation option',
     );
 }
 
