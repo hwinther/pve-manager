@@ -5,7 +5,7 @@ all:
 export PERLLIB=..
 
 .PHONY: check
-check: test-replication test-balloon test-vzdump test-osd test-ceph-health test-ceph-auth test-ceph-key-migration test-ceph-lockbox-migration test-custom-cpu-models
+check: test-replication test-balloon test-vzdump test-osd test-ceph-health test-ceph-auth test-ceph-key-migration test-ceph-lockbox-migration test-custom-cpu-models test-pvesh
 
 .PHONY: test-balloon
 test-balloon:
@@ -52,6 +52,10 @@ test-ceph-lockbox-migration:
 .PHONY: test-custom-cpu-models
 test-custom-cpu-models:
 	./CustomCPUModels_test.pl
+
+.PHONY: test-pvesh
+test-pvesh:
+	./pvesh_test.pl
 
 .PHONY: install
 install:
