@@ -520,16 +520,22 @@ sub summarize_monitor_connections($connections, $verbose = 0) {
     my @vm_ids = sort { $a <=> $b } keys %$vms;
     my $extra = !$verbose && scalar(@vm_ids) > 8 ? scalar(@vm_ids) - 8 : 0;
     splice(@vm_ids, 8) if $extra;
-    my @parts = map { "VM $_" } @vm_ids;
-    push @parts, "$extra more VMs" if $extra;
+    my @vms = map { "VM $_" } @vm_ids;
+    push @vms, "$extra more VMs" if $extra;
+    my @parts;
+    push @parts, join(', ', @vms) if @vms;
+
     if ($processless) {
-        push @parts,
-            !$verbose ? 'possible kernel client'
-            : $processless == 1 ? 'possible kernel client (socket without an owning process)'
-            : "possible kernel client ($processless sockets without an owning process)";
+        my $sockets =
+            $processless == 1 ? 'unattributed socket' : "$processless unattributed sockets";
+        my $clients = $processless == 1 ? 'client' : 'clients';
+        $sockets .= ' without an owning process' if $verbose;
+        push @parts, "$sockets (possible kernel $clients)";
     }
-    push @parts, map { $others->{$_} > 1 ? "$_ ($others->{$_})" : $_ } sort keys %$others;
-    return scalar(@parts) ? join(', ', @parts) : undef;
+    push @parts,
+        join(', ', map { $others->{$_} > 1 ? "$_ ($others->{$_})" : $_ } sort keys %$others)
+        if scalar(keys %$others);
+    return scalar(@parts) ? join('; ', @parts) : undef;
 }
 
 # Retain old or unidentified instances observed around a rotation, including partial retry samples.

@@ -2475,12 +2475,12 @@ my sub cluster {
     ]);
     is(
         $hint,
-        'VM 102, VM 9001, possible kernel client,' . ' pvestatd (2), rbd',
+        'VM 102, VM 9001; 2 unattributed sockets (possible kernel clients); pvestatd (2), rbd',
         'VMs are unique and processless sockets remain possible kernel clients',
     );
     is(
         summarize_monitor_connections([{ port => 6789 }]),
-        'possible kernel client',
+        'unattributed socket (possible kernel client)',
         'one processless socket is not presented as a known mount',
     );
     is(
@@ -2492,6 +2492,11 @@ my sub cluster {
         'daemons and the Proxmox VE RADOS workers alone give no hint',
     );
     is(summarize_monitor_connections('garbage'), undef, 'and so does a malformed answer');
+    is(
+        summarize_monitor_connections([{ process => 'kvm', vmid => 102 }, {}], 1),
+        'VM 102; unattributed socket without an owning process (possible kernel client)',
+        'verbose output keeps the unidentified socket separate from the VM',
+    );
 
     my $live = [
         { host => '10.0.0.2', global_id => 1 },
