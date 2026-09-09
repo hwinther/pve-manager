@@ -1,3 +1,22 @@
+pve-manager (9.2.19) trixie; urgency=medium
+
+  * pvesh: fix startup failure caused by API endpoints with empty parameter
+    schemas, such as 'pvesh get /cluster/firewall/options'.
+
+  * ceph: Cephx key migration:
+    - refuse staged-key confirmation when a visible client's key cannot be
+      identified, rather than treating a new session as proof of refresh
+    - keep device inspection errors concise without hiding short failure
+      reasons; retain full diagnostics with '--verbose'
+    - allow recovery once nodes are reachable, even if daemons with unfinished
+      key updates remain stopped, without assuming their keys need repair
+    - separate unidentified monitor sockets from VM hints to avoid implying
+      that a VM uses a kernel client
+    - explicitly report successful dry-run preflight checks, retaining a
+      warning when '--force' was used
+
+ -- Proxmox Support Team <support@proxmox.com>  Thu, 10 Sep 2026 01:52:06 +0200
+
 pve-manager (9.2.18) trixie; urgency=medium
 
   * ceph: Cephx key migration:
