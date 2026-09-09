@@ -112,7 +112,14 @@ sub parse_probe_output($output) {
 
         if ($kind eq 'error') {
             $probe->{store} = 'probe-error';
-            $probe->{error} = $payload;
+            my $error = eval { decode_json($payload) };
+            if (ref($error) eq 'HASH' && defined($error->{message}) && !ref($error->{message})) {
+                $probe->{error} = $error->{message};
+                $probe->{'error-details'} = $error->{details}
+                    if defined($error->{details}) && !ref($error->{details});
+            } else {
+                $probe->{error} = $payload;
+            }
         } elsif ($kind eq 'keyring') {
             $probe->{store} = 'file';
             $probe->{sections} = [$payload =~ m/\[([^\]]+)\]/g];

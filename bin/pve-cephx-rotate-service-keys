@@ -324,16 +324,17 @@ my sub write_cluster_file($path, $content) {
     return;
 }
 
-# prints verbatim; parse_probe_output() decides what it means, where it can be tested
+# One line per result; JSON preserves multiline command diagnostics without confusing the parser.
 my $PROBE_SCRIPT = <<'PERL_EOF';
 use strict;
 use warnings;
 
+use JSON;
 use File::Temp;
 use POSIX ();
 
-# ($output, $error): a command that fails must not come back as empty output, or a missing binary
-# and a label that genuinely carries no key would read the same.
+# A failed command returns a summary and separate stderr, never empty output that could be
+# mistaken for a label without a key.
 sub command_output {
     my (@cmd) = @_;
 
@@ -356,12 +357,17 @@ sub command_output {
         $reason = do { local $/; <$eh> } // '';
         close($eh);
     }
-    $reason =~ s/\s+/ /g;
-    $reason =~ s/^ | $//g;
-    $reason = length($reason) ? " ($reason)" : '';
-
-    return (undef, "'$cmd[0]' failed: exit status " . ($status >> 8) . $reason) if !$ok;
-    return (undef, "'$cmd[0]' printed nothing$reason") if $out !~ m/\S/;
+    # Prefer the tool's error over a timestamped Ceph log line, without printing an unbounded trace.
+    my @lines = grep { /\S/ } split(/\n/, $reason);
+    my ($summary) = grep { !/^\s*\d{4}-\d\d-\d\d[T ]/ } @lines;
+    $summary //= $lines[0] // '';
+    $summary =~ s/\s+/ /g;
+    $summary =~ s/^ | $//g;
+    $summary = substr($summary, 0, 197) . '...' if length($summary) > 200;
+    $summary = length($summary) ? ": $summary" : '';
+    my $status_text = $status & 127 ? 'signal ' . ($status & 127) : 'exit status ' . ($status >> 8);
+    return (undef, "'$cmd[0]' failed: $status_text$summary", $reason) if !$ok;
+    return (undef, "'$cmd[0]' printed nothing$summary", $reason) if $out !~ m/\S/;
 
     return ($out, undef);
 }
@@ -372,10 +378,10 @@ for my $spec (@specs) {
     my $dir = "/var/lib/ceph/$type/$cluster-$id";
 
     if (-e "$dir/block") {
-        my ($label, $err) =
+        my ($label, $err, $details) =
             command_output('ceph-bluestore-tool', 'show-label', '--dev', "$dir/block");
         if (defined($err)) {
-            print "error $spec $err\n";
+            print "error $spec ", encode_json({ message => $err, details => $details }), "\n";
         } else {
             $label =~ s/\n//g;
             print "label $spec $label\n";
@@ -1332,6 +1338,7 @@ my sub probe_nodes($info, $plan, $opts = {}) {
         my $probe = $by_node->{ $daemon->{node} }->{"$daemon->{type}:$daemon->{id}"} // {};
         $daemon->{store} = $probe->{store};
         $daemon->{error} = $probe->{error};
+        $daemon->{'error-details'} = $probe->{'error-details'};
         $daemon->{sections} = $probe->{sections};
         $daemon->{'label-whoami'} = $probe->{'label-whoami'};
         $daemon->{'label-fsid'} = $probe->{'label-fsid'};
@@ -2210,8 +2217,8 @@ my sub preflight_nodes($info, $plan, $opts) {
 
         if ($store eq 'probe-error') {
             push @unusable,
-                "the data directory of $daemon->{entity} on node '$daemon->{node}' could not be"
-                . " read: "
+                "cannot inspect $daemon->{entity} on node '$daemon->{node}'"
+                . " (/var/lib/ceph/$type/$ccname-$daemon->{id}/block): "
                 . ($daemon->{error} // 'no reason given');
         } elsif ($store eq 'missing' || $store eq 'unknown') {
             push @unusable,
@@ -2282,7 +2289,17 @@ my sub preflight_nodes($info, $plan, $opts) {
     if (@unusable) {
         log_fail("These keys cannot be rewritten where their daemons read them, so rotating them"
             . " would strand the daemons:");
-        log_steps(\@unusable);
+        log_steps(\@unusable, 1);
+        my @details = grep { length($_->{'error-details'} // '') } @touched;
+        if (@details && !$opts->{verbose}) {
+            log_text("Run with '--verbose' for the full inspection diagnostics.");
+        } elsif (@details) {
+            for my $daemon (@details) {
+                log_text(
+                    "\nInspection diagnostics for $daemon->{entity} on node '$daemon->{node}':");
+                log_step($_) for split(/\n/, $daemon->{'error-details'});
+            }
+        }
         return -1;
     }
 
@@ -5538,6 +5555,8 @@ sub key_migration_test_hooks {
         print_closing_notes => \&print_closing_notes,
         resume_live_swap => \&resume_live_swap,
         probe_nodes => \&probe_nodes,
+        probe_script => $PROBE_SCRIPT,
+        preflight_nodes => \&preflight_nodes,
         check_client_kernels => \&check_client_kernels,
         manual_promotion_with_retries => \&manual_promotion_with_retries,
         describe_live => \&describe_live,

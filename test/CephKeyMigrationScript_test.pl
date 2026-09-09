@@ -5172,4 +5172,101 @@ for my $case ([0, 0], [1, 0], [0, 1], [1, 1]) {
     is($asked, 1, 'an accepted invocation asks only once');
 }
 
+{
+    my ($commands, $inventory) =
+        split(/\nmy \(\$cluster, \@specs\) = \@ARGV;/, $HOOKS->{probe_script}, 2);
+    die "could not isolate the node probe commands\n" if !defined($inventory);
+    my $command_output = eval "package CephProbeTest; $commands; \\&command_output";
+    die $@ if $@;
+
+    my $trace = "Input/output error\n" . ("native frame\n" x 100);
+    for my $case (
+        [
+            'long stderr',
+            'print "{}"; print STDERR "Input/output error\\n" . ("native frame\\n" x 100); exit 5',
+            'failed: exit status 5: Input/output error',
+            $trace,
+        ],
+        [
+            'short stderr',
+            'print STDERR "not a block device\\n"; exit 1',
+            'failed: exit status 1: not a block device',
+            "not a block device\n",
+        ],
+        [
+            'Ceph log before error',
+            'print STDERR "2026-09-10T01:58:36.169+0200 123 -1 No valid label\\n";'
+                . ' print STDERR "unable to read label: (13) Permission denied\\n"; exit 1',
+            'failed: exit status 1: unable to read label: (13) Permission denied',
+            "2026-09-10T01:58:36.169+0200 123 -1 No valid label\n"
+                . "unable to read label: (13) Permission denied\n",
+        ],
+        [
+            'long diagnostic line',
+            'print STDERR "x" x 500; exit 1',
+            'failed: exit status 1: ' . ('x' x 197) . '...',
+            'x' x 500,
+        ],
+        [
+            'only a Ceph log',
+            'print STDERR "2026-09-10T01:58:36 error\\n"; exit 1',
+            'failed: exit status 1: 2026-09-10T01:58:36 error',
+            "2026-09-10T01:58:36 error\n",
+        ],
+        ['no stderr', 'exit 7', 'failed: exit status 7', ''],
+        ['empty output', 'exit 0', 'printed nothing', ''],
+        ['signal', 'kill 15, $$', 'failed: signal 15', ''],
+    ) {
+        my ($name, $code, $reason, $details) = @$case;
+        my ($output, $error, $stderr) = $command_output->($^X, '-e', $code);
+        is($output, undef, "$name never becomes a successful label read");
+        is($error, "'$^X' $reason", "$name retains a bounded diagnostic with the command result");
+        is($stderr, $details, "$name preserves the complete diagnostic separately");
+    }
+
+    my (undef, $message, $details) = $command_output->(
+        $^X,
+        '-e',
+        'print STDERR "Input/output error\\n" . ("native frame\\n" x 100); exit 5',
+    );
+    my $probe = PVE::Ceph::KeyMigration::parse_probe_output(
+        'error osd:4 ' . encode_json({ message => $message, details => $details }) . "\n",
+    )->{'osd:4'};
+    is($probe->{store}, 'probe-error', 'a structured inspection error remains a refusal');
+    is($probe->{'error-details'}, $trace, 'multiline diagnostics survive the node protocol');
+    my $daemon = {
+        %$probe,
+        type => 'osd',
+        id => '4',
+        entity => 'osd.4',
+        node => 'node2',
+        version => '20.2.4-pve4',
+        binary => '20.2.4-pve4',
+    };
+    my $info = { daemons => { mon => [], mgr => [], mds => [], osd => [$daemon] } };
+    my $plan = { daemons => [$daemon], lockbox_keys => [] };
+
+    for my $verbose (0, 1) {
+        my ($output, $verdict);
+        {
+            local *STDOUT;
+            open(STDOUT, '>', \$output) or die $!;
+            $verdict = $HOOKS->{preflight_nodes}->($info, $plan, { verbose => $verbose });
+        }
+        is($verdict, -1, "an unreadable OSD refuses rotation with verbose=$verbose");
+        like($output, qr/osd\.4 on node 'node2'.*ceph-4\/block/s, 'the refusal locates the device');
+        if ($verbose) {
+            is(
+                scalar(() = $output =~ /native frame/g),
+                100,
+                'verbose output retains the full trace',
+            );
+        } else {
+            like($output, qr/Input\/output error/, 'the ordinary refusal retains the short reason');
+            unlike($output, qr/native frame/, 'the ordinary refusal omits the native stack trace');
+            like($output, qr/--verbose/, 'the ordinary refusal explains how to get the details');
+        }
+    }
+}
+
 done_testing();
