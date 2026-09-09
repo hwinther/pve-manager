@@ -5269,4 +5269,110 @@ for my $case ([0, 0], [1, 0], [0, 1], [1, 1]) {
     }
 }
 
+{
+    my $plan = {
+        daemons => [
+            { type => 'mgr', id => 'a', entity => 'mgr.a', node => 'node1' },
+            { type => 'osd', id => '4', entity => 'osd.4', node => 'node2' },
+            { type => 'mds', id => 'b', entity => 'mds.b', node => 'node2' },
+            { type => 'osd', id => '5', entity => 'osd.5', node => 'node2', down => 1 },
+        ],
+    };
+    for my $case (
+        ['healthy', 1, 1, []],
+        ['node lost before its daemons were reached', 1, 0, ['osd.4', 'mds.b']],
+        ['unreachable monitors', 0, 0, []],
+    ) {
+        my ($name, $connected, $up, $expected) = @$case;
+        my $output = '';
+        my $down;
+        my @queries;
+        my $before = dclone($plan);
+        {
+            no warnings qw(once redefine);
+            local *StagedRotationRados::mon_command = sub {
+                my ($self, $args) = @_;
+                die "unexpected command '$args->{prefix}'\n" if $args->{prefix} ne 'health';
+                die "monitor unavailable\n" if !$connected;
+                return {};
+            };
+            local *PVE::Ceph::Services::daemon_is_up = sub {
+                my ($rados, $type, $id) = @_;
+                push @queries, "$type.$id";
+                return $type eq 'mgr' || $up;
+            };
+            local *STDOUT;
+            open(STDOUT, '>', \$output) or die $!;
+            $down = $HOOKS->{report_unavailable_daemons}->(StagedRotationRados->new(), $plan);
+        }
+        is_deeply([map { $_->{entity} } @$down], $expected, "$name: preserve the liveness result");
+        is_deeply(
+            \@queries,
+            $connected ? ['mgr.a', 'osd.4', 'mds.b'] : [],
+            "$name: check the whole plan, excluding previously stopped daemons",
+        );
+        is_deeply($plan, $before, "$name: reporting does not change the plan");
+        if (@$expected) {
+            like(
+                $output,
+                qr/osd\.4.*node2.*mds\.b.*node2/s,
+                'identify unavailable daemons and their node',
+            );
+            like(
+                $output,
+                qr/Keep .*json.*intact.*rerun this helper once the nodes are reachable/s,
+                'retain the journal and restore node reachability before rerunning',
+            );
+            unlike(
+                $output,
+                qr/auth get|set-label-key|prime-osd-dir|write.*keyring/,
+                'liveness alone never recommends rewriting keys',
+            );
+            like(
+                $output,
+                qr/unfinished key updates can resume while their daemons are stopped/,
+                'interrupted daemons need not start before the helper can resume',
+            );
+        } else {
+            is($output, '', "$name: no unsupported recovery diagnosis");
+        }
+    }
+
+    for my $phase (qw(writing written)) {
+        my $state =
+            { live_swap => { 'osd.1' => { phase => $phase, key => key_fingerprint($NEW) } } };
+        my $rados = StagedRotationRados->new(key => $OLD, pending => $NEW);
+        my $daemon = { entity => 'osd.1' };
+        my $output;
+        {
+            no warnings qw(once redefine);
+            local *main::file_set_contents = sub { };
+            local *STDOUT;
+            open(STDOUT, '>', \$output) or die $!;
+            is(
+                $HOOKS->{resume_live_swap}->($rados, $state, $daemon),
+                1,
+                "$phase: a durable copy still requires a safe stop",
+            );
+            is(
+                $rados->issued('auth commit-pending'),
+                0,
+                "$phase: no promotion before the safe-stop gate",
+            );
+            $HOOKS->{resume_live_swap}->($rados, $state, $daemon, 1);
+        }
+        is(
+            $rados->issued('auth commit-pending'),
+            1,
+            "$phase: owned pending key is promoted after the gate",
+        );
+        unlike(
+            $output,
+            qr/earlier run|wrote.*to disk/,
+            "$phase: neither invocation nor completed write is inferred",
+        );
+        like($output, qr/may already be on disk/, "$phase: recovery explains the journal evidence");
+    }
+}
+
 done_testing();

@@ -3032,11 +3032,11 @@ my sub resume_live_swap($rados, $state, $daemon, $commit = 0) {
     }
 
     if ($decided->{verdict} eq 'commit' && !$commit) {
-        log_info("an earlier run may have written the pending key for '$entity'; it will be"
-            . " committed after the daemon is safe to stop");
+        log_info("the pending key for '$entity' may already be on disk; it will be committed"
+            . " after the daemon is safe to stop");
         return 1;
     } elsif ($decided->{verdict} eq 'commit') {
-        log_info("an earlier run wrote the pending key for '$entity' to disk; committing it now");
+        log_info("committing the pending key for '$entity', which may already be on disk");
         $rados->mon_command({ prefix => 'auth commit-pending', entity => $entity });
     } elsif ($decided->{verdict} eq 'clear') {
         log_info("dropping the pending key for '$entity' because no durable copy holds it");
@@ -5000,6 +5000,29 @@ my sub apply_consent_gate($opts, $confirm = \&confirm_apply_run, $interactive = 
     };
 }
 
+my sub report_unavailable_daemons($rados, $plan) {
+    # A failed monitor command also reads as 'not up'. Probe connectivity before checking the
+    # whole plan, which can include daemons not reached before an interruption.
+    my @down;
+    if (eval { $rados->mon_command({ prefix => 'health', format => 'json' }); 1 }) {
+        # Daemons already stopped at the start were deliberately left that way.
+        @down = grep {
+            !$_->{down} && !PVE::Ceph::Services::daemon_is_up($rados, $_->{type}, $_->{id})
+        } $plan->{daemons}->@*;
+    }
+    if (@down) {
+        log_text("");
+        for my $daemon (@down) {
+            log_warn("'$daemon->{entity}' on node '$daemon->{node}' is unavailable.");
+        }
+        log_text("Check the affected nodes, service status, and logs. A down daemon alone does not"
+            . " indicate a key mismatch. Keep '$STATE_FILE' intact and rerun this helper once the"
+            . " nodes are reachable. Follow its current next steps; unfinished key updates can"
+            . " resume while their daemons are stopped.");
+    }
+    return \@down;
+}
+
 my sub run_migration($opts, $confirm = \&confirm_apply_run) {
     PVE::RPCEnvironment->setup_default_cli_env();
     PVE::Ceph::Tools::check_ceph_inited();
@@ -5435,38 +5458,12 @@ my sub run_migration($opts, $confirm = \&confirm_apply_run) {
     # refuses while a staged key exists, so this only undoes a staging that failed before its key
     release_manual_promotion($rados, $state) if $failure && $state->{client_grace};
 
-    # check while this run still knows which it touched; probe first, as a failed command reads as
-    # 'not up'
-    my @down;
-    if (eval { $rados->mon_command({ prefix => 'health', format => 'json' }); 1 }) {
-        # one that was already stopped when this run began was left that way on purpose
-        @down = grep {
-            !$_->{down} && !PVE::Ceph::Services::daemon_is_up($rados, $_->{type}, $_->{id})
-        } $plan->{daemons}->@*;
-    }
-    if (@down) {
-        log_text("");
-        for my $daemon (@down) {
-            my $how =
-                $daemon->{type} eq 'osd'
-                ? "write it into the bluestore label with 'ceph-bluestore-tool set-label-key"
-                . " --dev /var/lib/ceph/osd/$ccname-$daemon->{id}/block -k osd_key -v <key>',"
-                . " prime the data directory from that label, then start the daemon. Writing"
-                . " only the keyring file works until the next reboot, which rebuilds that"
-                . " directory from the label"
-                : "write it to /var/lib/ceph/$daemon->{type}/$ccname-$daemon->{id}/keyring on"
-                . " that node, then start the daemon";
-            log_warn("'$daemon->{entity}' on node '$daemon->{node}' is not up again. Read its"
-                . " current key with 'ceph auth get $daemon->{entity}' and $how.");
-        }
-    }
+    my $down = report_unavailable_daemons($rados, $plan);
 
     die $failure if $failure;
 
-    if (@down) {
-        die "the migration left "
-            . scalar(@down)
-            . " daemon(s) down, resolve that before running this again\n";
+    if (@$down) {
+        die scalar(@$down) . " planned daemon(s) remain unavailable\n";
     }
 
     health_gate($rados, undef, "finishing");
@@ -5543,6 +5540,7 @@ sub key_migration_test_hooks {
         parse_options => \&parse_options,
         main => \&main,
         run_migration => \&run_migration,
+        report_unavailable_daemons => \&report_unavailable_daemons,
         confirm_apply_run => \&confirm_apply_run,
         apply_consent_gate => \&apply_consent_gate,
         preflight => \&preflight_cluster,
