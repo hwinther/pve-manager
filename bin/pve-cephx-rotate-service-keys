@@ -5353,7 +5353,12 @@ my sub run_migration($opts, $confirm = \&confirm_apply_run) {
         );
 
         log_heading("Dry run finished");
-        log_text("Run this again with '--apply' to carry the plan out.");
+        if ($opts->{force}) {
+            log_warn("Dry run used '--force'; review any bypassed checks before applying.");
+        } else {
+            log_pass("Preflight checks passed for the displayed plan.");
+        }
+        log_text("Review the plan, then run this again with '--apply' to carry it out.");
         return 0;
     }
 

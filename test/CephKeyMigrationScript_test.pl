@@ -5375,4 +5375,34 @@ for my $case ([0, 0], [1, 0], [0, 1], [1, 1]) {
     }
 }
 
+{
+    # Exercise the actual footer without running cluster discovery or migration operations.
+    my $source = file_get_contents($SCRIPT);
+    my ($footer) = $source =~ /(        log_heading\("Dry run finished"\);.*?        return 0;)/s;
+    die "could not isolate the dry-run footer\n" if !defined($footer);
+    my $render = eval 'sub { my ($opts) = @_;' . $footer . '}';
+    die $@ if $@;
+    for my $force (0, 1) {
+        my $output = '';
+        {
+            local *STDOUT;
+            open(STDOUT, '>', \$output) or die $!;
+            $render->({ force => $force });
+        }
+        like(
+            $output,
+            $force
+            ? qr/WARN: Dry run used '--force'; review any bypassed checks/
+            : qr/PASS: Preflight checks passed for the displayed plan\./,
+            'the footer distinguishes passed checks from an explicit override',
+        );
+        unlike($output, $force ? qr/PASS:/ : qr/WARN:/, 'the result has no contradictory label');
+        like(
+            $output,
+            qr/Review the plan, then run this again with '--apply'/,
+            'review remains required',
+        );
+    }
+}
+
 done_testing();
