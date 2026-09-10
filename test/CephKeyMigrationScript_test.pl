@@ -1938,6 +1938,82 @@ sub aggregate_fixture {
     );
 }
 
+# A staged user's old key can open new sessions after the baseline was collected.
+for my $aggregate (0, 1) {
+    for my $arrival (qw(initial boundary)) {
+        my ($rados, $info, $state) =
+            aggregate_fixture({ complete => 1, clients => {} }, qw(client.a client.b));
+        my $unknown = { 'client.b' => [{ global_id => 900, host => 'node-b' }] };
+        $info->{sessions}->{clients} = $unknown if $arrival eq 'initial';
+        my $open = PVE::Ceph::KeyMigration::open_actions(
+            '/helper', {}, {}, {}, 'aes256k', dclone($state), $info,
+        );
+        if ($arrival eq 'initial') {
+            ok(
+                !(grep { $_ eq 'client.b' } $open->{ready}->@*),
+                'unknown new sessions prevent a confirmation offer',
+            );
+            like(
+                $open->{waiting_details}->{'client.b'},
+                qr/Session-key identification requires/,
+                'the dry run explains how to resolve missing fingerprints',
+            );
+        }
+        my ($output, $verdict);
+        my $poll = 0;
+        {
+            no warnings qw(once redefine);
+            local *main::file_set_contents = sub { };
+            local *STDOUT;
+            open(STDOUT, '>', \$output) or die $!;
+            $verdict = $HOOKS->{preflight}->(
+                $info,
+                {
+                    apply => 1,
+                    $aggregate
+                    ? ('confirm-all-clients-refreshed' => 1)
+                    : ('confirm-clients-refreshed' => ['client.b']),
+                },
+                0,
+                $state,
+                {},
+                sub {
+                    $poll++;
+                    return {
+                        sessions => {
+                            complete => 1,
+                            clients => $arrival eq 'initial'
+                                || $poll >= ($aggregate ? 3 : 2) ? $unknown : {},
+                        },
+                    };
+                },
+            );
+        }
+        is(
+            $verdict,
+            -1,
+            "$arrival unknown session refuses "
+                . ($aggregate ? 'aggregate' : 'singular')
+                . ' confirmation',
+        );
+        is_deeply(
+            $rados->{committed},
+            $aggregate && $arrival eq 'boundary' ? ['client.a'] : [],
+            'only a key committed before the new session appeared may stay committed',
+        );
+        ok(
+            exists($state->{staged}->{'client.b'})
+                && !defined($state->{client_refresh}->{'client.b'}->{cleared}),
+            'the blocked key keeps both credentials and its open refresh record',
+        );
+        like(
+            $output,
+            qr/Session-key identification requires/,
+            'the refusal recommends monitor upgrades or disconnection',
+        );
+    }
+}
+
 sub run_aggregate_confirmation {
     my ($info, $state) = @_;
     no warnings qw(once redefine);

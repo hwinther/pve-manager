@@ -769,6 +769,13 @@ sub ack_decision($entity, $state, $sessions, $stale) {
         return { verdict => 'measure', live => $live };
     }
 
+    # Both keys authenticate while staged, so a new global ID does not prove use of the new key.
+    if (($state->{staged} // {})->{$entity}) {
+        my @unknown = grep { !length($_->{key_fingerprint} // '') }
+            @{ ($sessions->{clients} // {})->{$entity} // [] };
+        return { verdict => 'unidentified', held => \@unknown } if @unknown;
+    }
+
     return { verdict => 'accept' };
 }
 
@@ -1194,6 +1201,12 @@ sub open_options(
                     : "Not every monitor answered.";
                 $waiting_details->{$entity} = "consumer verification is incomplete. $reason$both"
                     . " Retry after every monitor answers.";
+            } elsif ($verdict eq 'unidentified') {
+                $waiting_sessions->{$entity} = $decision->{held};
+                $waiting_details->{$entity} =
+                    scalar($decision->{held}->@*)
+                    . " session(s) have no key fingerprint.$both "
+                    . session_key_support_hint();
             } elsif ($verdict eq 'measure') {
                 $waiting_details->{$entity} =
                     "the first complete consumer measurement is"

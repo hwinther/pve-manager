@@ -1797,6 +1797,13 @@ my sub preflight_cluster(
                     . ")");
                 $confirmation_refused = 1;
             }
+            if ($decision->{verdict} eq 'unidentified') {
+                log_fail("not accepting '--confirm-all-clients-refreshed': the key used by "
+                    . scalar($decision->{held}->@*)
+                    . " session(s) of '$entity' cannot be verified. "
+                    . session_key_support_hint());
+                $confirmation_refused = 1;
+            }
             my $mark = $state->{client_refresh}->{$entity};
             my $needs_measurement =
                 $mark->{measurement_incomplete} || !defined($mark->{session_ids});
@@ -1870,6 +1877,14 @@ my sub preflight_cluster(
                 $confirmation_refused = 1;
                 next;
             }
+            if ($verdict eq 'unidentified') {
+                log_fail("not accepting '$option': the key used by "
+                    . scalar($decision->{held}->@*)
+                    . " session(s) cannot be verified. "
+                    . session_key_support_hint());
+                $confirmation_refused = 1;
+                next;
+            }
             # An interrupted or externally performed rotation may lack a complete baseline. Record
             # old-key and unidentified sessions before accepting attestations for unseen consumers.
             if ($verdict eq 'measure') {
@@ -1923,8 +1938,15 @@ my sub preflight_cluster(
                 );
                 my $action = ack_decision($entity, $state, $fresh->{sessions}, $action_stale);
                 if ($action->{verdict} ne 'accept') {
-                    log_fail("not accepting '$option' at the commit boundary: a fresh consumer"
-                        . " check no longer proves that every visible consumer is refreshed");
+                    log_fail(
+                        "not accepting '$option' at the commit boundary: a fresh consumer"
+                            . " check no longer proves that every visible consumer is refreshed"
+                            . (
+                                $action->{verdict} eq 'unidentified'
+                                ? '. ' . session_key_support_hint()
+                                : ''
+                            )
+                    );
                     $confirmation_refused = 1;
                     next;
                 }

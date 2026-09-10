@@ -931,7 +931,17 @@ is(
         },
     };
     my $staged_info = {
-        %$clean, exported => { 'client.admin' => { key => $OLD, pending_key => $NEW } },
+        %$clean,
+        exported => { 'client.admin' => { key => $OLD, pending_key => $NEW } },
+        sessions => {
+            complete => 1,
+            clients => {
+                'client.admin' => [{
+                    global_id => 99,
+                    key_fingerprint => key_fingerprint($NEW),
+                }],
+            },
+        },
     };
     ok(
         finish_after_acks($staged_info, $staged_state, ['client.admin']),
@@ -2588,8 +2598,8 @@ my sub cluster {
     is(scalar(@admin), 1, 'a staged user with live but unrecorded sessions gets one line too');
     like(
         $admin[0],
-        qr/^'client\.admin': consumer refresh awaits your confirmation with '--confirm-clients-refreshed client\.admin --apply'/,
-        'confirmation remains explicit without labelling every live session stale',
+        qr/^'client\.admin': 10 session\(s\) have no key fingerprint\. Both keys remain valid\./,
+        'unidentified new sessions cannot be offered confirmation while both keys authenticate',
     );
     my @tools = grep { m/bootstrap and crash keys/ } @$blockers;
     is(scalar(@tools), 1, 'the open bootstrap and crash records are one line');
@@ -3207,6 +3217,49 @@ my sub cluster {
         qr/then rerun without options\./,
         'refresh guidance selects a fresh status check instead of repeating old options',
     );
+}
+
+{
+    my $target = key_fingerprint($NEW);
+    my $refresh = { 'client.vm' => { session_ids => [100] } };
+    for my $case (
+        ['new unknown session while staged', 1, [{ global_id => 900 }], 'unidentified'],
+        [
+            'empty fingerprint while staged',
+            1,
+            [{ global_id => 900, key_fingerprint => '' }],
+            'unidentified',
+        ],
+        [
+            'target-key session while staged',
+            1,
+            [{ global_id => 100, key_fingerprint => $target }],
+            'accept',
+        ],
+        [
+            'conflicting observations while staged',
+            1,
+            [{ global_id => 900, key_fingerprint => $target }, { global_id => 900 }],
+            'unidentified',
+        ],
+        ['disconnected staged user', 1, [], 'accept'],
+        ['new session after immediate replacement', 0, [{ global_id => 900 }], 'accept'],
+        [
+            'recorded session after immediate replacement',
+            0,
+            [{ global_id => 100 }],
+            'connected',
+        ],
+    ) {
+        my ($name, $staged, $live, $expected) = @$case;
+        my $state = {
+            client_refresh => $refresh,
+            staged => $staged ? { 'client.vm' => { key => $target, written => 1 } } : {},
+        };
+        my $sessions = { complete => 1, clients => { 'client.vm' => $live } };
+        my $stale = stale_consumers($sessions, $refresh, { 'client.vm' => $target });
+        is(ack_decision('client.vm', $state, $sessions, $stale)->{verdict}, $expected, $name);
+    }
 }
 
 done_testing();
