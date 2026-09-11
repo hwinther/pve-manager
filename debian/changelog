@@ -1,3 +1,10 @@
+pve-manager (9.2.20) trixie; urgency=medium
+
+  * Revert "partially fix #1989: ui: qemu: disk: add qcow2 cache size config"
+    - the corresponding qemu-server changes are not yet rolled out
+
+ -- Proxmox Support Team <support@proxmox.com>  Fri, 11 Sep 2026 14:10:20 +0200
+
 pve-manager (9.2.19) trixie; urgency=medium
 
   * pvesh: fix startup failure caused by API endpoints with empty parameter
